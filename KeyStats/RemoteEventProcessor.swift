@@ -14,14 +14,6 @@ final class RemoteEventProcessor: NSObject, KeyStatsEventSinkProtocol {
     private override init() { super.init() }
 
     func receiveEvent(_ payload: [String: Any]) {
-        #if DEBUG
-        struct Counter { static var n: Int = 0; static let lock = NSLock() }
-        Counter.lock.lock(); Counter.n += 1; let n = Counter.n; Counter.lock.unlock()
-        if n <= 3 || n % 50 == 0 {
-            let typeRaw = (payload[HelperPayloadFields.type] as? NSNumber)?.uint32Value ?? 0
-            NSLog("[RemoteEventProcessor] #\(n) raw type=\(typeRaw) keys=\(payload.keys.sorted())")
-        }
-        #endif
         guard let typeRaw = (payload[HelperPayloadFields.type] as? NSNumber)?.uint32Value,
               let type = CGEventType(rawValue: typeRaw) else { return }
 
@@ -129,6 +121,8 @@ final class InputEventDecoder {
         }
     }
 
+    private var asciiKeyCache = Array<String?>(repeating: nil, count: 128)
+
     func keyName(keyCode: Int, keyboardType: UInt32, flagsRaw: UInt64) -> String {
         let base = baseKeyName(for: keyCode, keyboardType: keyboardType)
         let modifiers = keyboardEventModifierNames(rawFlags: flagsRaw, keyCode: keyCode)
@@ -140,7 +134,20 @@ final class InputEventDecoder {
         if let mapped = Self.keyCodeMap[keyCode] {
             return mapped
         }
+        if keyCode >= 0 && keyCode < 128 {
+            layoutLock.lock()
+            let cached = asciiKeyCache[keyCode]
+            layoutLock.unlock()
+            if let cached = cached {
+                return cached
+            }
+        }
         if let asciiName = asciiKeyName(for: keyCode, keyboardType: keyboardType) {
+            if keyCode >= 0 && keyCode < 128 {
+                layoutLock.lock()
+                asciiKeyCache[keyCode] = asciiName
+                layoutLock.unlock()
+            }
             return asciiName
         }
         return "Key\(keyCode)"
@@ -180,6 +187,7 @@ final class InputEventDecoder {
         }
         layoutLock.lock()
         cachedLayoutData = layoutData
+        asciiKeyCache = Array<String?>(repeating: nil, count: 128)
         layoutLock.unlock()
     }
 

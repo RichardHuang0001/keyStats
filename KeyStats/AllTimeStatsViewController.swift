@@ -746,10 +746,14 @@ class AllTimeStatsViewController: NSViewController {
         }
     }
     
-    private func formatNumber(_ number: Int) -> String {
+    private static let decimalFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
+        return formatter
+    }()
+
+    private func formatNumber(_ number: Int) -> String {
+        return Self.decimalFormatter.string(from: NSNumber(value: number)) ?? "\(number)"
     }
 
     func scrollToTop() {

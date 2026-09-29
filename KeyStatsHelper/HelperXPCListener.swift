@@ -8,7 +8,7 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
     private let tap = EventTapController()
     private let stateLock = NSLock()
     private var activeConnection: NSXPCConnection?
-    private var forwardCount: Int = 0
+    private var activeProxy: KeyStatsEventSinkProtocol?
 
     override init() {
         self.listener = NSXPCListener(machServiceName: HelperLocations.machServiceName)
@@ -50,6 +50,10 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
         )
         newConnection.remoteObjectInterface = remote
 
+        let proxy = newConnection.remoteObjectProxyWithErrorHandler { err in
+            NSLog("[KeyStatsHelper] remote proxy error: \(err)")
+        } as? KeyStatsEventSinkProtocol
+
         newConnection.invalidationHandler = { [weak self, weak newConnection] in
             self?.handleConnectionClosed(newConnection)
         }
@@ -61,6 +65,7 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
 
         stateLock.lock()
         activeConnection = newConnection
+        activeProxy = proxy
         stateLock.unlock()
 
         idle.connectionDidOpen()
@@ -103,6 +108,7 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
         stateLock.lock()
         if activeConnection === conn {
             activeConnection = nil
+            activeProxy = nil
             tap.stop()
         }
         stateLock.unlock()
@@ -166,20 +172,9 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
 
     func forward(payload: [String: Any]) {
         stateLock.lock()
-        let conn = activeConnection
-        forwardCount += 1
-        let n = forwardCount
+        let proxy = activeProxy
         stateLock.unlock()
-        guard let conn = conn else {
-            if n <= 3 { NSLog("[KeyStatsHelper] forward #\(n) no active connection") }
-            return
-        }
-        let proxy = conn.remoteObjectProxyWithErrorHandler { err in
-            NSLog("[KeyStatsHelper] remote proxy error: \(err)")
-        } as? KeyStatsEventSinkProtocol
-        if n <= 3 || n % 100 == 0 {
-            NSLog("[KeyStatsHelper] forward #\(n) proxy=\(proxy == nil ? "nil" : "ok")")
-        }
-        proxy?.receiveEvent(payload)
+        guard let proxy = proxy else { return }
+        proxy.receiveEvent(payload)
     }
 }

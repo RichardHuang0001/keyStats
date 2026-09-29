@@ -180,7 +180,10 @@ class MenuBarController {
                                        showsColorDot: minimalMode &&
                                            StatsManager.shared.enableDynamicIconColor &&
                                            StatsManager.shared.currentInputRatePerSecond > 0)
-            statusItem.length = statusView.intrinsicContentSize.width
+            let newWidth = statusView.intrinsicContentSize.width
+            if statusItem.length != newWidth {
+                statusItem.length = newWidth
+            }
         } else if let button = statusItem.button {
             button.attributedTitle = makeStatusTitle(keysText: parts.keys, clicksText: parts.clicks)
             button.contentTintColor = style == .icon ? tintColor : nil
@@ -409,6 +412,9 @@ class MenuBarStatusView: NSView {
     }
 
     func update(keysText: String, clicksText: String) {
+        if self.currentKeysText == keysText && self.currentClicksText == clicksText {
+            return
+        }
         let updateBlock = {
             self.currentKeysText = keysText
             self.currentClicksText = clicksText
@@ -436,13 +442,20 @@ class MenuBarStatusView: NSView {
     }
 
     func updateIconColor(_ color: NSColor?, style: DynamicIconColorStyle, isMinimalMode: Bool, showsColorDot: Bool) {
+        let computedShowsDot = showsColorDot || (style == .dot && color != nil)
+        if self.viewModel.iconColor == color &&
+           self.viewModel.colorStyle == style &&
+           self.viewModel.isMinimalMode == isMinimalMode &&
+           self.showsColorDot == computedShowsDot {
+            return
+        }
         let updateBlock = {
             self.viewModel.iconColor = color
             self.viewModel.colorStyle = style
             self.viewModel.isMinimalMode = isMinimalMode
-            self.viewModel.showsColorDot = showsColorDot || (style == .dot && color != nil)
+            self.viewModel.showsColorDot = computedShowsDot
             self.isMinimalMode = isMinimalMode
-            self.showsColorDot = showsColorDot || (style == .dot && color != nil)
+            self.showsColorDot = computedShowsDot
         }
 
         if Thread.isMainThread {

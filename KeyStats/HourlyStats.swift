@@ -18,21 +18,43 @@ struct HourlyStats: Codable, Equatable {
     private var buckets: [String: Counts] = [:]
     private(set) var recordedThrough: Date?
 
+    private var _calendar: Calendar
+    var calendar: Calendar { _calendar }
+
+    // Hot-path cache for active recording
+    private var cachedHourStart: Date?
+    private var cachedHourEnd: Date?
+    private var cachedBucketKey: String?
+
     init(startedAt: Date = Date(), timeZone: TimeZone = .current) {
         self.startedAt = startedAt
-        timeZoneIdentifier = timeZone.identifier
+        self.timeZoneIdentifier = timeZone.identifier
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        self._calendar = cal
     }
 
-    var calendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: timeZoneIdentifier) ?? .current
-        return calendar
+    static func == (lhs: HourlyStats, rhs: HourlyStats) -> Bool {
+        lhs.startedAt == rhs.startedAt &&
+        lhs.timeZoneIdentifier == rhs.timeZoneIdentifier &&
+        lhs.buckets == rhs.buckets &&
+        lhs.recordedThrough == rhs.recordedThrough
     }
 
     mutating func record(keys: Int = 0, clicks: Int = 0, at date: Date = Date()) {
-        guard date >= startedAt,
-              let hour = Self.hourInterval(containing: date, calendar: calendar) else { return }
-        let key = bucketKey(hour.start)
+        guard date >= startedAt else { return }
+        let key: String
+        if let start = cachedHourStart, let end = cachedHourEnd, let bKey = cachedBucketKey,
+           date >= start, date < end {
+            key = bKey
+        } else {
+            guard let hour = Self.hourInterval(containing: date, calendar: _calendar) else { return }
+            let bKey = bucketKey(hour.start)
+            cachedHourStart = hour.start
+            cachedHourEnd = hour.end
+            cachedBucketKey = bKey
+            key = bKey
+        }
         var counts = buckets[key] ?? Counts()
         counts.keys = saturatingNonnegativeSum([counts.keys, keys])
         counts.clicks = saturatingNonnegativeSum([counts.clicks, clicks])
@@ -77,7 +99,11 @@ struct HourlyStats: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         startedAt = try values.decode(Date.self, forKey: .startedAt)
-        timeZoneIdentifier = try values.decode(String.self, forKey: .timeZoneIdentifier)
+        let tzId = try values.decode(String.self, forKey: .timeZoneIdentifier)
+        timeZoneIdentifier = tzId
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: tzId) ?? .current
+        _calendar = cal
         buckets = try values.decode([String: Counts].self, forKey: .buckets)
         recordedThrough = try values.decodeIfPresent(Date.self, forKey: .recordedThrough)
         // Older Foundation hour intervals can start before a half-hour clock
@@ -228,6 +254,9 @@ struct HourlyStats: Codable, Equatable {
             let start = Date(timeIntervalSince1970: Double(timestamp))
             return start < day.start || start >= day.end
         }
+        cachedHourStart = nil
+        cachedHourEnd = nil
+        cachedBucketKey = nil
     }
 
     /// Wall-clock hours split at offset transitions, including 30-minute DST

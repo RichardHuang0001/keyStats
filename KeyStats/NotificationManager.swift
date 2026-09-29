@@ -34,10 +34,14 @@ final class NotificationManager {
         center.add(request, withCompletionHandler: nil)
     }
 
-    private func thresholdBody(for metric: Metric, count: Int) -> String {
+    private static let decimalFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        let formattedCount = formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        return formatter
+    }()
+
+    private func thresholdBody(for metric: Metric, count: Int) -> String {
+        let formattedCount = Self.decimalFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
         let key: String
         switch metric {
         case .keyPresses:

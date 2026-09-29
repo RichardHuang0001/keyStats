@@ -113,9 +113,15 @@ class StatsManager {
     private var history: [String: DailyStats] = [:]
     private var saveTimer: Timer?
     private var statsUpdateTimer: Timer?
+    private var menuBarUpdateTimer: Timer?
     private var midnightCheckTimer: Timer?
     private let saveInterval: TimeInterval = 2.0
-    private let statsUpdateDebounceInterval: TimeInterval = 0.3
+    private let uiThrottleInterval: TimeInterval = 0.15
+    private var lastMenuBarUpdateTime: CFAbsoluteTime = 0
+    private var lastStatsUpdateTime: CFAbsoluteTime = 0
+    private var isMenuBarDispatchPending = false
+    private var isStatsDispatchPending = false
+    private let uiDispatchLock = NSLock()
     
     private var inputRateWindowSeconds: TimeInterval {
         let val = userDefaults.double(forKey: dynamicIconColorWindowKey)
@@ -163,7 +169,7 @@ class StatsManager {
     var showKeyPressesInMenuBar: Bool {
         didSet {
             userDefaults.set(showKeyPressesInMenuBar, forKey: showKeyPressesKey)
-            notifyMenuBarUpdate()
+            notifyMenuBarUpdate(immediate: true)
         }
     }
     
@@ -171,7 +177,7 @@ class StatsManager {
     var showMouseClicksInMenuBar: Bool {
         didSet {
             userDefaults.set(showMouseClicksInMenuBar, forKey: showMouseClicksKey)
-            notifyMenuBarUpdate()
+            notifyMenuBarUpdate(immediate: true)
         }
     }
 
@@ -179,7 +185,7 @@ class StatsManager {
     var minimalMenuBarMode: Bool {
         didSet {
             userDefaults.set(minimalMenuBarMode, forKey: minimalMenuBarModeKey)
-            notifyMenuBarUpdate()
+            notifyMenuBarUpdate(immediate: true)
         }
     }
 
@@ -187,7 +193,7 @@ class StatsManager {
     var appStatsEnabled: Bool {
         didSet {
             userDefaults.set(appStatsEnabled, forKey: appStatsEnabledKey)
-            notifyStatsUpdate()
+            notifyStatsUpdate(immediate: true)
         }
     }
 
@@ -275,8 +281,8 @@ class StatsManager {
             guard cachedMouseDistanceCalibrationFactor != clamped else { return }
             cachedMouseDistanceCalibrationFactor = clamped
             userDefaults.set(clamped, forKey: mouseDistanceCalibrationFactorKey)
-            notifyMenuBarUpdate()
-            notifyStatsUpdate()
+            notifyMenuBarUpdate(immediate: true)
+            notifyStatsUpdate(immediate: true)
         }
     }
 
@@ -340,6 +346,7 @@ class StatsManager {
         
         isReadyForUpdates = true
         saveStats()
+        saveHistory()
         if enableDynamicIconColor {
             resetInputRateBuckets()
             startInputRateTracking()
@@ -352,8 +359,8 @@ class StatsManager {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            self.notifyMenuBarUpdate()
-            self.notifyStatsUpdate()
+            self.notifyMenuBarUpdate(immediate: true)
+            self.notifyStatsUpdate(immediate: true)
         }
     }
     
@@ -845,17 +852,17 @@ class StatsManager {
     
     // MARK: - 数据持久化
     
+    private static var historyFileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        let dir = base.appendingPathComponent("KeyStats", isDirectory: true)
+        return dir.appendingPathComponent("dailyStatsHistory.json")
+    }
+
     private func saveStats() {
         statsStateLock.lock()
         let statsSnapshot = currentStats
         let hourlySnapshot = hourlyStats
-        let calendar = Calendar.current
-        let normalizedDate = calendar.startOfDay(for: statsSnapshot.date)
-        let key = dateFormatter.string(from: normalizedDate)
-        var normalizedStats = statsSnapshot
-        normalizedStats.date = normalizedDate
-        history[key] = normalizedStats
-        let historySnapshot = history
         statsStateLock.unlock()
 
         if let encoded = try? JSONEncoder().encode(hourlySnapshot) {
@@ -864,8 +871,32 @@ class StatsManager {
         if let encoded = try? JSONEncoder().encode(statsSnapshot) {
             userDefaults.set(encoded, forKey: statsKey)
         }
-        if let encoded = try? JSONEncoder().encode(historySnapshot) {
-            userDefaults.set(encoded, forKey: historyKey)
+    }
+
+    private func saveHistory() {
+        statsStateLock.lock()
+        let historySnapshot = history
+        statsStateLock.unlock()
+        saveHistoryToFile(historySnapshot)
+    }
+
+    private func saveHistoryToFile(_ historyToSave: [String: DailyStats]) {
+        guard let encoded = try? JSONEncoder().encode(historyToSave) else { return }
+        let destination = Self.historyFileURL
+        let directory = destination.deletingLastPathComponent()
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporary = directory.appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
+        do {
+            try encoded.write(to: temporary, options: [.atomic])
+            if fileManager.fileExists(atPath: destination.path) {
+                _ = try fileManager.replaceItemAt(destination, withItemAt: temporary)
+            } else {
+                try fileManager.moveItem(at: temporary, to: destination)
+            }
+        } catch {
+            try? fileManager.removeItem(at: temporary)
+            try? encoded.write(to: destination, options: [.atomic])
         }
     }
 
@@ -895,11 +926,20 @@ class StatsManager {
     }
 
     private func loadHistory() -> [String: DailyStats] {
-        guard let data = userDefaults.data(forKey: historyKey),
-              let stored = try? JSONDecoder().decode([String: DailyStats].self, from: data) else {
-            return [:]
+        let fileURL = Self.historyFileURL
+        if FileManager.default.fileExists(atPath: fileURL.path),
+           let data = try? Data(contentsOf: fileURL),
+           let stored = try? JSONDecoder().decode([String: DailyStats].self, from: data) {
+            return stored
         }
-        return stored
+        // Fallback & Migration from legacy UserDefaults
+        if let data = userDefaults.data(forKey: historyKey),
+           let stored = try? JSONDecoder().decode([String: DailyStats].self, from: data) {
+            saveHistoryToFile(stored)
+            userDefaults.removeObject(forKey: historyKey)
+            return stored
+        }
+        return [:]
     }
 
     // MARK: - 数据导入导出
@@ -1013,8 +1053,9 @@ class StatsManager {
         saveTimer = nil
         updateNotificationBaselines()
         saveStats()
-        notifyMenuBarUpdate()
-        notifyStatsUpdate()
+        saveHistory()
+        notifyMenuBarUpdate(immediate: true)
+        notifyStatsUpdate(immediate: true)
     }
 
     private func currentHistorySnapshot() -> [String: DailyStats] {
@@ -1196,34 +1237,130 @@ class StatsManager {
         statsUpdateHandlers[token] = nil
     }
 
-    private func notifyMenuBarUpdate() {
+    private func notifyMenuBarUpdate(immediate: Bool = false) {
         guard menuBarUpdateHandler != nil else { return }
+        if immediate {
+            uiDispatchLock.lock()
+            isMenuBarDispatchPending = true
+            uiDispatchLock.unlock()
+            let block = { [weak self] in
+                guard let self = self else { return }
+                self.uiDispatchLock.lock()
+                self.isMenuBarDispatchPending = false
+                self.uiDispatchLock.unlock()
+                self.menuBarUpdateTimer?.invalidate()
+                self.menuBarUpdateTimer = nil
+                self.lastMenuBarUpdateTime = CFAbsoluteTimeGetCurrent()
+                self.menuBarUpdateHandler?()
+            }
+            if Thread.isMainThread {
+                block()
+            } else {
+                DispatchQueue.main.async(execute: block)
+            }
+            return
+        }
+
+        uiDispatchLock.lock()
+        if isMenuBarDispatchPending {
+            uiDispatchLock.unlock()
+            return
+        }
+        isMenuBarDispatchPending = true
+        uiDispatchLock.unlock()
+
         DispatchQueue.main.async { [weak self] in
-            self?.menuBarUpdateHandler?()
+            guard let self = self else { return }
+            self.uiDispatchLock.lock()
+            self.isMenuBarDispatchPending = false
+            self.uiDispatchLock.unlock()
+
+            guard let handler = self.menuBarUpdateHandler else { return }
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - self.lastMenuBarUpdateTime
+            if elapsed >= self.uiThrottleInterval {
+                self.menuBarUpdateTimer?.invalidate()
+                self.menuBarUpdateTimer = nil
+                self.lastMenuBarUpdateTime = now
+                handler()
+            } else if self.menuBarUpdateTimer == nil {
+                let remaining = max(0.01, self.uiThrottleInterval - elapsed)
+                self.menuBarUpdateTimer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.menuBarUpdateTimer = nil
+                    self.lastMenuBarUpdateTime = CFAbsoluteTimeGetCurrent()
+                    self.menuBarUpdateHandler?()
+                }
+            }
         }
     }
 
-    private func notifyStatsUpdate() {
+    private func notifyStatsUpdate(immediate: Bool = false) {
         guard !statsUpdateHandlers.isEmpty else { return }
+        if immediate {
+            uiDispatchLock.lock()
+            isStatsDispatchPending = true
+            uiDispatchLock.unlock()
+            let block = { [weak self] in
+                guard let self = self else { return }
+                self.uiDispatchLock.lock()
+                self.isStatsDispatchPending = false
+                self.uiDispatchLock.unlock()
+                self.statsUpdateTimer?.invalidate()
+                self.statsUpdateTimer = nil
+                self.lastStatsUpdateTime = CFAbsoluteTimeGetCurrent()
+                for handler in self.statsUpdateHandlers.values {
+                    handler()
+                }
+            }
+            if Thread.isMainThread {
+                block()
+            } else {
+                DispatchQueue.main.async(execute: block)
+            }
+            return
+        }
+
+        uiDispatchLock.lock()
+        if isStatsDispatchPending {
+            uiDispatchLock.unlock()
+            return
+        }
+        isStatsDispatchPending = true
+        uiDispatchLock.unlock()
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            for handler in self.statsUpdateHandlers.values {
-                handler()
+            self.uiDispatchLock.lock()
+            self.isStatsDispatchPending = false
+            self.uiDispatchLock.unlock()
+
+            guard !self.statsUpdateHandlers.isEmpty else { return }
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - self.lastStatsUpdateTime
+            if elapsed >= self.uiThrottleInterval {
+                self.statsUpdateTimer?.invalidate()
+                self.statsUpdateTimer = nil
+                self.lastStatsUpdateTime = now
+                for handler in self.statsUpdateHandlers.values {
+                    handler()
+                }
+            } else if self.statsUpdateTimer == nil {
+                let remaining = max(0.01, self.uiThrottleInterval - elapsed)
+                self.statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.statsUpdateTimer = nil
+                    self.lastStatsUpdateTime = CFAbsoluteTimeGetCurrent()
+                    for handler in self.statsUpdateHandlers.values {
+                        handler()
+                    }
+                }
             }
         }
     }
 
     private func scheduleDebouncedStatsUpdate() {
-        guard !statsUpdateHandlers.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            // 取消旧的 timer，实现真正的防抖
-            self.statsUpdateTimer?.invalidate()
-            self.statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: self.statsUpdateDebounceInterval, repeats: false) { [weak self] _ in
-                self?.statsUpdateTimer = nil
-                self?.notifyStatsUpdate()
-            }
-        }
+        notifyStatsUpdate()
     }
 
     func flushPendingSave() {
@@ -1231,11 +1368,29 @@ class StatsManager {
         saveTimer = nil
         statsUpdateTimer?.invalidate()
         statsUpdateTimer = nil
+        menuBarUpdateTimer?.invalidate()
+        menuBarUpdateTimer = nil
         midnightCheckTimer?.invalidate()
         midnightCheckTimer = nil
         inputRateTimer?.invalidate()
         inputRateTimer = nil
+
+        statsStateLock.lock()
+        let current = currentStats
+        let calendar = Calendar.current
+        let normalizedDate = calendar.startOfDay(for: current.date)
+        let key = dateFormatter.string(from: normalizedDate)
+        var normalizedCurrent = current
+        normalizedCurrent.date = normalizedDate
+        history[key] = normalizedCurrent
+        statsStateLock.unlock()
+
         saveStats()
+        saveHistory()
+        menuBarUpdateHandler?()
+        for handler in statsUpdateHandlers.values {
+            handler()
+        }
     }
     
     // MARK: - 午夜重置
@@ -1293,9 +1448,11 @@ class StatsManager {
         statsStateLock.unlock()
 
         if didReset {
+            saveStats()
+            saveHistory()
             updateNotificationBaselines()
-            notifyMenuBarUpdate()
-            notifyStatsUpdate()
+            notifyMenuBarUpdate(immediate: true)
+            notifyStatsUpdate(immediate: true)
         }
 
         scheduleNextMidnightReset()
@@ -1307,9 +1464,11 @@ class StatsManager {
         resetStatsLocked(for: now)
         hourlyStats.reset(on: now, calendar: .current)
         statsStateLock.unlock()
+        saveStats()
+        saveHistory()
         updateNotificationBaselines()
-        notifyMenuBarUpdate()
-        notifyStatsUpdate()
+        notifyMenuBarUpdate(immediate: true)
+        notifyStatsUpdate(immediate: true)
     }
 
     /// 调用前必须持有 statsStateLock
@@ -1324,9 +1483,11 @@ class StatsManager {
         statsStateLock.lock()
         resetStatsLocked(for: date)
         statsStateLock.unlock()
+        saveStats()
+        saveHistory()
         updateNotificationBaselines()
-        notifyMenuBarUpdate()
-        notifyStatsUpdate()
+        notifyMenuBarUpdate(immediate: true)
+        notifyStatsUpdate(immediate: true)
     }
 
     /// 调用前必须持有 statsStateLock — 原子重置 currentStats 和滑动窗口
