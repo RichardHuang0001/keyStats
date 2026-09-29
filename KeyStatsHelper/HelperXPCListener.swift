@@ -8,7 +8,6 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
     private let tap = EventTapController()
     private let stateLock = NSLock()
     private var activeConnection: NSXPCConnection?
-    private var activeProxy: KeyStatsEventSinkProtocol?
 
     override init() {
         self.listener = NSXPCListener(machServiceName: HelperLocations.machServiceName)
@@ -50,10 +49,6 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
         )
         newConnection.remoteObjectInterface = remote
 
-        let proxy = newConnection.remoteObjectProxyWithErrorHandler { err in
-            NSLog("[KeyStatsHelper] remote proxy error: \(err)")
-        } as? KeyStatsEventSinkProtocol
-
         newConnection.invalidationHandler = { [weak self, weak newConnection] in
             self?.handleConnectionClosed(newConnection)
         }
@@ -65,7 +60,6 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
 
         stateLock.lock()
         activeConnection = newConnection
-        activeProxy = proxy
         stateLock.unlock()
 
         idle.connectionDidOpen()
@@ -85,9 +79,13 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
         status = SecCodeCheckValidity(code, [], nil)
         guard status == errSecSuccess else { return false }
 
+        var staticCode: SecStaticCode?
+        status = SecCodeCopyStaticCode(code, [], &staticCode)
+        guard status == errSecSuccess, let staticCode = staticCode else { return false }
+
         var info: CFDictionary?
         status = SecCodeCopySigningInformation(
-            code as! SecStaticCode,
+            staticCode,
             SecCSFlags(rawValue: UInt32(kSecCSSigningInformation)),
             &info
         )
@@ -108,7 +106,6 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
         stateLock.lock()
         if activeConnection === conn {
             activeConnection = nil
-            activeProxy = nil
             tap.stop()
         }
         stateLock.unlock()
@@ -172,9 +169,10 @@ final class HelperXPCListener: NSObject, NSXPCListenerDelegate, KeyStatsHelperPr
 
     func forward(payload: [String: Any]) {
         stateLock.lock()
-        let proxy = activeProxy
+        let conn = activeConnection
         stateLock.unlock()
-        guard let proxy = proxy else { return }
-        proxy.receiveEvent(payload)
+        guard let conn = conn else { return }
+        let proxy = conn.remoteObjectProxy() as? KeyStatsEventSinkProtocol
+        proxy?.receiveEvent(payload)
     }
 }
