@@ -94,8 +94,6 @@ class StatsManager {
     }
     
     private let userDefaults = UserDefaults.standard
-    private let statsKey = "dailyStats"
-    private let historyKey = "dailyStatsHistory"
     private let hourlyStatsKey = "hourlyStats.v1"
     private var hourlyStats = HourlyStats()
     private let showKeyPressesKey = "showKeyPressesInMenuBar"
@@ -111,6 +109,7 @@ class StatsManager {
     private let mouseDistanceCalibrationFactorKey = "mouseDistanceCalibrationFactor"
     private let dateFormatter: DateFormatter
     private var history: [String: DailyStats] = [:]
+    private let dailyPersistence = DailyStatsPersistence(defaults: .standard, historyURL: StatsManager.historyFileURL)
     private var saveTimer: Timer?
     private var statsUpdateTimer: Timer?
     private var menuBarUpdateTimer: Timer?
@@ -325,28 +324,18 @@ class StatsManager {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         currentStats = DailyStats(date: today)
-        history = normalizedHistory(loadHistory())
+        let recovered = dailyPersistence.load(today: today)
+        history = normalizedHistory(recovered.history)
+        currentStats = normalizedDailyStats(recovered.current)
         if let data = userDefaults.data(forKey: hourlyStatsKey),
            let stored = try? JSONDecoder().decode(HourlyStats.self, from: data) {
             hourlyStats = stored
-        }
-
-        // 优先加载 dailyStats；如果缺失或不是今天，回退到 history 里的今天数据。
-        let loadedCurrent = loadStats().map(normalizedDailyStats)
-        if let savedStats = loadedCurrent, calendar.isDate(savedStats.date, inSameDayAs: today) {
-            currentStats = savedStats
-        } else {
-            let todayKey = dateFormatter.string(from: today)
-            if let todayHistory = history[todayKey] {
-                currentStats = normalizedDailyStats(todayHistory)
-            }
         }
 
         updateNotificationBaselines()
         
         isReadyForUpdates = true
         saveStats()
-        saveHistory()
         if enableDynamicIconColor {
             resetInputRateBuckets()
             startInputRateTracking()
@@ -860,44 +849,14 @@ class StatsManager {
     }
 
     private func saveStats() {
+        // Keep snapshot and persistence bookkeeping in one critical section: an
+        // older save must never overwrite a newer rollover/import checkpoint.
         statsStateLock.lock()
-        let statsSnapshot = currentStats
-        let hourlySnapshot = hourlyStats
-        statsStateLock.unlock()
-
-        if let encoded = try? JSONEncoder().encode(hourlySnapshot) {
+        defer { statsStateLock.unlock() }
+        if let encoded = try? JSONEncoder().encode(hourlyStats) {
             userDefaults.set(encoded, forKey: hourlyStatsKey)
         }
-        if let encoded = try? JSONEncoder().encode(statsSnapshot) {
-            userDefaults.set(encoded, forKey: statsKey)
-        }
-    }
-
-    private func saveHistory() {
-        statsStateLock.lock()
-        let historySnapshot = history
-        statsStateLock.unlock()
-        saveHistoryToFile(historySnapshot)
-    }
-
-    private func saveHistoryToFile(_ historyToSave: [String: DailyStats]) {
-        guard let encoded = try? JSONEncoder().encode(historyToSave) else { return }
-        let destination = Self.historyFileURL
-        let directory = destination.deletingLastPathComponent()
-        let fileManager = FileManager.default
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let temporary = directory.appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
-        do {
-            try encoded.write(to: temporary, options: [.atomic])
-            if fileManager.fileExists(atPath: destination.path) {
-                _ = try fileManager.replaceItemAt(destination, withItemAt: temporary)
-            } else {
-                try fileManager.moveItem(at: temporary, to: destination)
-            }
-        } catch {
-            try? fileManager.removeItem(at: temporary)
-            try? encoded.write(to: destination, options: [.atomic])
-        }
+        dailyPersistence.save(current: currentStats, history: history)
     }
 
     /// A value snapshot for the local hourly view; sync does not modify these counters.
@@ -915,31 +874,6 @@ class StatsManager {
         return DisplayStatsAggregator.hourlySeries(local: local, remote: remote,
                                                    currentDeviceId: state.deviceId,
                                                    date: date, recent24Hours: recent24Hours)
-    }
-
-    private func loadStats() -> DailyStats? {
-        guard let data = userDefaults.data(forKey: statsKey),
-              let stats = try? JSONDecoder().decode(DailyStats.self, from: data) else {
-            return nil
-        }
-        return stats
-    }
-
-    private func loadHistory() -> [String: DailyStats] {
-        let fileURL = Self.historyFileURL
-        if FileManager.default.fileExists(atPath: fileURL.path),
-           let data = try? Data(contentsOf: fileURL),
-           let stored = try? JSONDecoder().decode([String: DailyStats].self, from: data) {
-            return stored
-        }
-        // Fallback & Migration from legacy UserDefaults
-        if let data = userDefaults.data(forKey: historyKey),
-           let stored = try? JSONDecoder().decode([String: DailyStats].self, from: data) {
-            saveHistoryToFile(stored)
-            userDefaults.removeObject(forKey: historyKey)
-            return stored
-        }
-        return [:]
     }
 
     // MARK: - 数据导入导出
@@ -1041,6 +975,7 @@ class StatsManager {
             throw error
         }
         history = resolvedHistory
+        dailyPersistence.replaceHistory(resolvedHistory)
         hourlyStats = resolvedHourly
         currentStats = resolvedHistory[todayKey] ?? DailyStats(date: today)
         recentKeyTimestamps.removeAll()
@@ -1053,7 +988,6 @@ class StatsManager {
         saveTimer = nil
         updateNotificationBaselines()
         saveStats()
-        saveHistory()
         notifyMenuBarUpdate(immediate: true)
         notifyStatsUpdate(immediate: true)
     }
@@ -1383,10 +1317,10 @@ class StatsManager {
         var normalizedCurrent = current
         normalizedCurrent.date = normalizedDate
         history[key] = normalizedCurrent
+        dailyPersistence.archive(normalizedCurrent)
         statsStateLock.unlock()
 
         saveStats()
-        saveHistory()
         menuBarUpdateHandler?()
         for handler in statsUpdateHandlers.values {
             handler()
@@ -1449,7 +1383,6 @@ class StatsManager {
 
         if didReset {
             saveStats()
-            saveHistory()
             updateNotificationBaselines()
             notifyMenuBarUpdate(immediate: true)
             notifyStatsUpdate(immediate: true)
@@ -1463,9 +1396,10 @@ class StatsManager {
         statsStateLock.lock()
         resetStatsLocked(for: now)
         hourlyStats.reset(on: now, calendar: .current)
+        history[dateFormatter.string(from: Calendar.current.startOfDay(for: now))] = currentStats
+        dailyPersistence.archive(currentStats)
         statsStateLock.unlock()
         saveStats()
-        saveHistory()
         updateNotificationBaselines()
         notifyMenuBarUpdate(immediate: true)
         notifyStatsUpdate(immediate: true)
@@ -1484,7 +1418,6 @@ class StatsManager {
         resetStatsLocked(for: date)
         statsStateLock.unlock()
         saveStats()
-        saveHistory()
         updateNotificationBaselines()
         notifyMenuBarUpdate(immediate: true)
         notifyStatsUpdate(immediate: true)
@@ -1497,6 +1430,7 @@ class StatsManager {
             var archivedStats = currentStats
             archivedStats.date = previousDay
             history[dateFormatter.string(from: previousDay)] = archivedStats
+            dailyPersistence.archive(archivedStats)
         }
         currentStats = DailyStats(date: date)
         recentKeyTimestamps.removeAll()

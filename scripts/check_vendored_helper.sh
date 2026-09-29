@@ -1,18 +1,29 @@
 #!/bin/bash
-# Verify vendor/KeyStatsHelper.app's actual cdhash matches the value
-# recorded in vendor/KeyStatsHelper.cdhash.txt.
+# Verify Helper source provenance, bundle signature, and recorded cdhash.
 #
 # Run from CI and from local build_dmg.sh to detect a stale or
 # corrupted vendored helper before any further build work.
 #
 # Exit 0 on match, 1 on mismatch / missing files.
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENDOR_APP="$PROJECT_DIR/vendor/KeyStatsHelper.app"
 EXPECTED_FILE="$PROJECT_DIR/vendor/KeyStatsHelper.cdhash.txt"
+
+SOURCE_FILE="$PROJECT_DIR/vendor/KeyStatsHelper.source.sha256"
+if [ ! -f "$SOURCE_FILE" ]; then
+    echo "❌ Missing Helper source provenance. Run: ./scripts/rebuild_vendored_helper.sh"
+    exit 1
+fi
+SOURCE_EXPECTED=$(tr -d '[:space:]' < "$SOURCE_FILE")
+SOURCE_ACTUAL=$(python3 "$SCRIPT_DIR/helper_source_fingerprint.py" "$PROJECT_DIR")
+if [ "$SOURCE_EXPECTED" != "$SOURCE_ACTUAL" ]; then
+    echo "❌ Vendored helper sources/configuration are stale. Run: ./scripts/rebuild_vendored_helper.sh"
+    exit 1
+fi
 
 if [ ! -d "$VENDOR_APP" ]; then
     echo "❌ Missing vendored helper bundle: $VENDOR_APP"
@@ -27,6 +38,7 @@ if [ ! -f "$EXPECTED_FILE" ]; then
 fi
 
 EXPECTED=$(tr -d '[:space:]' < "$EXPECTED_FILE")
+codesign --verify --strict --all-architectures "$VENDOR_APP"
 ACTUAL=$(codesign -d -vvv "$VENDOR_APP" 2>&1 | awk -F'=' '/^CDHash=/ {print $2}' | tr -d '[:space:]')
 
 if [ -z "$ACTUAL" ]; then
@@ -42,7 +54,7 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
     echo "   The vendored bundle was modified without updating cdhash.txt,"
     echo "   or the helper sources changed without re-vendoring. Run:"
     echo "     ./scripts/rebuild_vendored_helper.sh"
-    echo "   then commit both vendor/KeyStatsHelper.app and vendor/KeyStatsHelper.cdhash.txt."
+    echo "   then commit vendor/KeyStatsHelper.app and vendor/KeyStatsHelper.{cdhash.txt,source.sha256}."
     exit 1
 fi
 

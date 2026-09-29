@@ -55,6 +55,7 @@ let package = Package(
             sources: [
                 "AppStats.swift",
                 "StatsModels.swift",
+                "DailyStatsPersistence.swift",
                 "HourlyStats.swift",
                 "UpdateCheckCoordinator.swift",
                 "Sync/SyncModels.swift",
@@ -68,7 +69,7 @@ let package = Package(
             name: "KeyStatsCoreTests",
             dependencies: ["KeyStatsCore"],
             path: "KeyStatsTests",
-            sources: ["HourlyStatsTests.swift", "AppStatsTests.swift", "StatsModelsTests.swift", "UpdateCheckCoordinatorTests.swift", "SyncCoreTests.swift"]
+            sources: ["DailyStatsPersistenceTests.swift", "HourlyStatsTests.swift", "AppStatsTests.swift", "StatsModelsTests.swift", "UpdateCheckCoordinatorTests.swift", "SyncCoreTests.swift"]
         )
     ]
 )

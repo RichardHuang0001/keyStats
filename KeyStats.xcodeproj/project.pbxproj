@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1000091 /* DailyStatsPersistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000091 /* DailyStatsPersistence.swift */; };
 		941ADB172F18D1AE00B2D578 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = 941ADB162F18D1AE00B2D578 /* PostHog */; };
 		941ADB182F18D1AE00B2D578 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 941ADB1A2F18D1AE00B2D578 /* Sparkle */; };
 		9479D3FC2F9B67480083A75E /* KeyStatsHelper.app in Embed Helper */ = {isa = PBXBuildFile; fileRef = 9479D3D62F9B66190083A75E /* KeyStatsHelper.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -81,6 +82,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A2000091 /* DailyStatsPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStatsPersistence.swift; sourceTree = "<group>"; };
 		9479D3D62F9B66190083A75E /* KeyStatsHelper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KeyStatsHelper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9A20000A /* HelperSupervisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperSupervisor.swift; sourceTree = "<group>"; };
 		9A20000B /* HelperXPCClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperXPCClient.swift; sourceTree = "<group>"; };
@@ -191,6 +193,7 @@
 				9A20000C /* RemoteEventProcessor.swift */,
 				9A20000D /* HelperMigrationPresenter.swift */,
 				A2000032 /* StatsModels.swift */,
+				A2000091 /* DailyStatsPersistence.swift */,
 				C2100004 /* HourlyStatsChartView.swift */,
 				C2100003 /* HourlyStatsViewController.swift */,
 				C2100002 /* HourlyStatsWindowController.swift */,
@@ -388,6 +391,7 @@
 				A1000003 /* StatsManager.swift in Sources */,
 				A1000022 /* AppStats.swift in Sources */,
 				A1000032 /* StatsModels.swift in Sources */,
+				A1000091 /* DailyStatsPersistence.swift in Sources */,
 				C1100004 /* HourlyStatsChartView.swift in Sources */,
 				C1100003 /* HourlyStatsViewController.swift in Sources */,
 				C1100002 /* HourlyStatsWindowController.swift in Sources */,
@@ -449,7 +453,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -459,7 +463,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.53;
+				MARKETING_VERSION = 1.53.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keystats.app.helper;
 				PRODUCT_NAME = KeyStatsHelper;
 				SKIP_INSTALL = YES;
@@ -478,7 +482,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -488,7 +492,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.53;
+				MARKETING_VERSION = 1.53.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keystats.app.helper;
 				PRODUCT_NAME = KeyStatsHelper;
 				SKIP_INSTALL = YES;
@@ -624,7 +628,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 51;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = 228XJY7Z32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -636,7 +640,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.53;
+				MARKETING_VERSION = 1.53.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keystats.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -653,7 +657,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 51;
+				CURRENT_PROJECT_VERSION = 52;
 				DEVELOPMENT_TEAM = 228XJY7Z32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -664,7 +668,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.53;
+				MARKETING_VERSION = 1.53.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.keystats.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
