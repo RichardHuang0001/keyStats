@@ -5,7 +5,16 @@ English | [简体中文](./README_ZH.md)
 <img width="128" height="128" alt="ICON-iOS-Default-256x256@2x" src="https://github.com/user-attachments/assets/842780ed-c7a1-4c1b-a901-1f1d8babe51a" />
 
 
-# KeyStats - macOS/Windows Keyboard & Mouse Statistics Menu Bar App
+# KeyStats (Optimized Edition) - macOS/Windows Keyboard & Mouse Statistics Menu Bar App
+
+> [!NOTE]
+> **Attribution & Notice**: This repository is a performance-optimized and hardened edition of the original [KeyStats](https://github.com/debugtheworldbot/keyStats) created by [@pipizhu](https://github.com/debugtheworldbot).
+>
+> **Key Enhancements**:
+> - **Micro-optimized Hot Path**: Hour window caching (`HourWindowCache`) eliminating redundant DateComponents allocation, and ASCII 0-127 fast lookup table.
+> - **Main Thread & UI Coalescing**: 150ms dual-edge UI throttling and `NSStatusItem` length width guards preventing menu bar layout jitter.
+> - **Decoupled Persistence**: Separated heavy daily history storage from the frequent 2-second save loop into an atomic, crash-resilient file in Application Support.
+> - **Reliable Provenance**: Verified helper provenance and safe XPC peer validation.
 
 KeyStats is a lightweight native menu bar application for macOS and Windows that tracks daily keyboard keystrokes, mouse clicks, mouse movement distance, and scroll distance, with optional end-to-end encrypted multi-device sync.
 

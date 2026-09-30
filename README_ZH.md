@@ -5,9 +5,16 @@
 
 <img width="128" height="128" alt="ICON-iOS-Default-256x256@2x" src="https://github.com/user-attachments/assets/842780ed-c7a1-4c1b-a901-1f1d8babe51a" />
 
+# KeyStats (性能优化增强版) - macOS/Windows 键鼠统计菜单栏应用
 
-# KeyStats - macOS/Windows 键鼠统计菜单栏应用
-
+> [!NOTE]
+> **开源致谢与说明**：本项目是基于 [@pipizhu](https://github.com/debugtheworldbot) 原创的优秀开源项目 [KeyStats](https://github.com/debugtheworldbot/keyStats) 构建的高性能与高容错增强版本。
+>
+> **主要优化升级**：
+> - **微秒级热路径优化**：引入时间窗口缓存（`HourWindowCache`）消除高频按键时的重复日历分桶计算，配合 ASCII 0-127 快速查表。
+> - **主线程与 UI 节流防抖**：150ms 双边缘聚合节流，配合菜单栏状态项宽度守卫，彻底消除高频打字时的菜单栏跳闪与主线程负载。
+> - **存储层解耦与容错持久化**：将跨月历史归档从 2 秒高频保存循环中剥离为独立的原子文件，大幅压减无谓 I/O 写入，并增加断电/跨日归档恢复机制。
+> - **安全稳健的进程间通信**：修复 Helper XPC 对端验证代码，规范 helper 构建指纹与签名链路。
 
 KeyStats 可以统计用户每日的键盘敲击次数、鼠标点击次数、鼠标移动距离和滚动距离，并支持可选的端到端加密多设备数据同步。
 
